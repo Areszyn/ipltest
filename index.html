@@ -307,6 +307,34 @@
       font-size: 20px;
     }
 
+    /* New Reset Stream Button */
+    .reset-stream-btn {
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      background: var(--accent);
+      color: white;
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      cursor: pointer;
+      z-index: 10;
+      box-shadow: 0 4px 15px rgba(255, 87, 34, 0.4);
+      transition: all 0.3s ease;
+    }
+
+    .reset-stream-btn:hover {
+      transform: scale(1.1);
+      box-shadow: 0 6px 20px rgba(255, 87, 34, 0.6);
+    }
+
+    .reset-stream-btn i {
+      font-size: 20px;
+    }
+
     @media (max-width: 768px) {
       .video-container {
         width: 100%;
@@ -336,6 +364,11 @@
   <div id="fallbackPlayer"></div>
 </div>
 
+<!-- Reset Stream Button -->
+<div class="reset-stream-btn" id="resetStreamBtn" title="Reset to default stream">
+  <i class="fas fa-sync-alt"></i>
+</div>
+
 <!-- Stream Switcher Button -->
 <div class="stream-switcher-btn" id="streamSwitcherBtn">
   <i class="fas fa-exchange-alt"></i>
@@ -350,6 +383,10 @@
     </div>
     
     <div class="stream-options">
+      <div class="stream-option active" onclick="switchStream('https://m3u8x2.cloudycx.net/media/hls/files/index.m3u8')">
+        <div class="stream-quality">Default</div>
+        <div class="stream-language">Original Stream</div>
+      </div>
       <div class="stream-option" onclick="switchStream('https://starsporthindii.pages.dev/index.m3u8')">
         <div class="stream-quality">HD</div>
         <div class="stream-language">Hindi Commentary</div>
@@ -408,11 +445,15 @@
 
 <script>
   const CONFIG = {
-    streamUrl: "https://m3u8x2.cloudycx.net/media/hls/files/index.m3u8",
-    telegramChannel: "https://t.me/neprosz"
+    defaultStreamUrl: "https://m3u8x2.cloudycx.net/media/hls/files/index.m3u8",
+    telegramChannel: "https://t.me/neprosz",
+    currentStreamUrl: ""
   };
 
   document.addEventListener('DOMContentLoaded', () => {
+    // Set the current stream to default
+    CONFIG.currentStreamUrl = CONFIG.defaultStreamUrl;
+    
     document.getElementById('premiumOverlay').style.display = 'flex';
     
     if (!isTelegram()) {
@@ -422,6 +463,11 @@
     }
 
     initPlayer();
+
+    // Reset stream button functionality
+    document.getElementById('resetStreamBtn').addEventListener('click', () => {
+      switchStream(CONFIG.defaultStreamUrl);
+    });
 
     // Stream switcher functionality
     document.getElementById('streamSwitcherBtn').addEventListener('click', () => {
@@ -474,7 +520,7 @@
   function initPlayer() {
     try {
       const player = jwplayer("player").setup({
-        file: CONFIG.streamUrl,
+        file: CONFIG.defaultStreamUrl,
         width: "100%",
         height: "100%",
         autostart: false
@@ -498,14 +544,14 @@
     const fallback = document.getElementById('fallbackPlayer');
     fallback.innerHTML = `
       <video controls autoplay playsinline style="width:100%;height:100%">
-        <source src="${CONFIG.streamUrl}" type="application/x-mpegURL">
+        <source src="${CONFIG.currentStreamUrl}" type="application/x-mpegURL">
       </video>
     `;
     fallback.style.display = 'block';
   }
 
   function switchStream(newUrl) {
-    CONFIG.streamUrl = newUrl;
+    CONFIG.currentStreamUrl = newUrl;
     
     // Highlight selected option
     const options = document.querySelectorAll('.stream-option');
@@ -518,7 +564,7 @@
     
     try {
       if (typeof jwplayer === 'function' && jwplayer().getState) {
-        jwplayer().load([{ file: CONFIG.streamUrl }]);
+        jwplayer().load([{ file: CONFIG.currentStreamUrl }]);
         jwplayer().play();
       } else {
         setupFallbackPlayer();
