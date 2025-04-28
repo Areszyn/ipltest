@@ -520,7 +520,8 @@
     telegramChannel: "https://t.me/neprosz",
     currentStreamUrl: "",
     isAudioMode: false,
-    isBackgrounded: false
+    isBackgrounded: false,
+    activePlayer: null // 'jwplayer' or 'fallback'
   };
 
   document.addEventListener('DOMContentLoaded', () => {
@@ -619,11 +620,16 @@
       
       player.on('ready', () => {
         document.getElementById('player').style.display = 'block';
+        CONFIG.activePlayer = 'jwplayer';
       });
       
       player.on('error', (e) => {
         console.error('JWPlayer error:', e);
         setupFallbackPlayer();
+      });
+      
+      player.on('play', () => {
+        CONFIG.activePlayer = 'jwplayer';
       });
     } catch (e) {
       console.error("JWPlayer init error:", e);
@@ -639,6 +645,12 @@
       </video>
     `;
     fallback.style.display = 'block';
+    CONFIG.activePlayer = 'fallback';
+    
+    const video = fallback.querySelector('video');
+    video.addEventListener('play', () => {
+      CONFIG.activePlayer = 'fallback';
+    });
   }
 
   function switchStream(newUrl) {
@@ -663,9 +675,12 @@
     } else {
       // Normal video stream switching
       try {
-        if (typeof jwplayer === 'function' && jwplayer().getState) {
-          jwplayer().load([{ file: CONFIG.currentStreamUrl }]);
+        if (typeof jwplayer === 'function' && jwplayer().load) {
+          jwplayer().load([{ file: newUrl }]);
           jwplayer().play();
+          document.getElementById('player').style.display = 'block';
+          document.getElementById('fallbackPlayer').style.display = 'none';
+          CONFIG.activePlayer = 'jwplayer';
         } else {
           setupFallbackPlayer();
         }
@@ -687,6 +702,14 @@
       document.getElementById('audioModeBtn').innerHTML = '<i class="fas fa-video"></i>';
       document.getElementById('audioModeBtn').title = 'Switch to video mode';
       document.getElementById('audioModeBtn').style.background = 'var(--primary)';
+      
+      // Pause current video player
+      if (CONFIG.activePlayer === 'jwplayer' && typeof jwplayer === 'function') {
+        jwplayer().pause();
+      } else {
+        const video = document.querySelector('#fallbackPlayer video');
+        if (video) video.pause();
+      }
       
       // Hide video players
       document.getElementById('player').style.display = 'none';
@@ -716,21 +739,27 @@
       audioElement.pause();
       audioElement.src = '';
       
-      // Show appropriate video player
-      if (document.getElementById('player').style.display === 'block') {
+      // Show and play appropriate video player
+      if (CONFIG.activePlayer === 'jwplayer') {
         document.getElementById('player').style.display = 'block';
-      } else {
-        document.getElementById('fallbackPlayer').style.display = 'block';
-      }
-      
-      // Resume video playback
-      try {
-        if (jwplayer().getState() === 'paused') {
-          jwplayer().play();
+        document.getElementById('fallbackPlayer').style.display = 'none';
+        try {
+          if (jwplayer().getState() === 'paused') {
+            jwplayer().play();
+          }
+        } catch (e) {
+          console.error('JWPlayer resume failed:', e);
+          setupFallbackPlayer();
         }
-      } catch (e) {
+      } else {
+        document.getElementById('player').style.display = 'none';
+        document.getElementById('fallbackPlayer').style.display = 'block';
         const video = document.querySelector('#fallbackPlayer video');
-        if (video && video.paused) video.play().catch(console.error);
+        if (video && video.paused) {
+          video.play().catch(e => {
+            console.error('Fallback player resume failed:', e);
+          });
+        }
       }
     }
   }
@@ -763,11 +792,15 @@
         const audioElement = document.getElementById('audioElement');
         if (audioElement.paused) audioElement.play().catch(console.error);
       } else {
-        try {
-          if (jwplayer().getState() === 'paused') {
-            jwplayer().play();
+        if (CONFIG.activePlayer === 'jwplayer') {
+          try {
+            if (jwplayer().getState() === 'paused') {
+              jwplayer().play();
+            }
+          } catch (e) {
+            console.error('JWPlayer resume failed:', e);
           }
-        } catch (e) {
+        } else {
           const video = document.querySelector('#fallbackPlayer video');
           if (video && video.paused) video.play().catch(console.error);
         }
@@ -776,26 +809,20 @@
   }
 
   function handleBackgroundPlayback() {
-    // Show notification about background playback
-    if (window.Telegram?.WebApp?.showAlert) {
-      Telegram.WebApp.showAlert(
-        "Playback will pause when minimized. Return to the app to continue watching.",
-        () => {}
-      );
-    } else {
-      alert("Playback will pause when minimized. Return to the app to continue watching.");
-    }
-    
     // Try to pause playback (most browsers will do this automatically)
     if (CONFIG.isAudioMode) {
       const audioElement = document.getElementById('audioElement');
       if (!audioElement.paused) audioElement.pause();
     } else {
-      try {
-        if (jwplayer().getState() === 'playing') {
-          jwplayer().pause();
+      if (CONFIG.activePlayer === 'jwplayer') {
+        try {
+          if (jwplayer().getState() === 'playing') {
+            jwplayer().pause();
+          }
+        } catch (e) {
+          console.error('JWPlayer pause failed:', e);
         }
-      } catch (e) {
+      } else {
         const video = document.querySelector('#fallbackPlayer video');
         if (video && !video.paused) video.pause();
       }
