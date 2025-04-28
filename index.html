@@ -12,6 +12,7 @@
       --dark: #121212;
       --darker: #0a0a0a;
       --accent: #FF5722;
+      --audio: #9c27b0;
       --text: #ffffff;
       --text-muted: rgba(255,255,255,0.7);
     }
@@ -307,7 +308,7 @@
       font-size: 20px;
     }
 
-    /* New Reset Stream Button */
+    /* Reset Stream Button */
     .reset-stream-btn {
       position: fixed;
       bottom: 20px;
@@ -335,6 +336,67 @@
       font-size: 20px;
     }
 
+    /* Audio Mode Button */
+    .audio-mode-btn {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--audio);
+      color: white;
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      cursor: pointer;
+      z-index: 10;
+      box-shadow: 0 4px 15px rgba(156, 39, 176, 0.4);
+      transition: all 0.3s ease;
+    }
+
+    .audio-mode-btn:hover {
+      transform: translateX(-50%) scale(1.1);
+      box-shadow: 0 6px 20px rgba(156, 39, 176, 0.6);
+    }
+
+    .audio-mode-btn i {
+      font-size: 20px;
+    }
+
+    /* Audio Player */
+    .audio-player {
+      position: fixed;
+      bottom: 80px;
+      left: 0;
+      width: 100%;
+      padding: 15px;
+      background: rgba(20, 20, 20, 0.9);
+      z-index: 1000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      border-top: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .audio-player audio {
+      width: 80%;
+      max-width: 400px;
+    }
+
+    .close-audio {
+      position: absolute;
+      right: 20px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 20px;
+      cursor: pointer;
+    }
+
     @media (max-width: 768px) {
       .video-container {
         width: 100%;
@@ -354,6 +416,10 @@
       .premium-card {
         padding: 30px 20px;
       }
+      
+      .audio-player audio {
+        width: 70%;
+      }
     }
   </style>
 </head>
@@ -364,14 +430,23 @@
   <div id="fallbackPlayer"></div>
 </div>
 
-<!-- Reset Stream Button -->
+<!-- Control Buttons -->
 <div class="reset-stream-btn" id="resetStreamBtn" title="Reset to default stream">
   <i class="fas fa-sync-alt"></i>
 </div>
 
-<!-- Stream Switcher Button -->
+<div class="audio-mode-btn" id="audioModeBtn" title="Switch to audio-only mode">
+  <i class="fas fa-music"></i>
+</div>
+
 <div class="stream-switcher-btn" id="streamSwitcherBtn">
   <i class="fas fa-exchange-alt"></i>
+</div>
+
+<!-- Audio Player -->
+<div class="audio-player" id="audioPlayer">
+  <audio controls id="audioElement"></audio>
+  <button class="close-audio" id="closeAudioBtn">&times;</button>
 </div>
 
 <!-- Stream Switcher Overlay -->
@@ -443,7 +518,9 @@
   const CONFIG = {
     defaultStreamUrl: "https://starsporthindii.pages.dev/index.m3u8",
     telegramChannel: "https://t.me/neprosz",
-    currentStreamUrl: ""
+    currentStreamUrl: "",
+    isAudioMode: false,
+    isBackgrounded: false
   };
 
   document.addEventListener('DOMContentLoaded', () => {
@@ -459,10 +536,28 @@
     }
 
     initPlayer();
+    setupVisibilityHandlers();
 
     // Reset stream button functionality
     document.getElementById('resetStreamBtn').addEventListener('click', () => {
-      switchStream(CONFIG.defaultStreamUrl);
+      if (CONFIG.isAudioMode) {
+        toggleAudioMode(); // First switch back to video mode
+        setTimeout(() => {
+          switchStream(CONFIG.defaultStreamUrl); // Then reset stream
+        }, 300);
+      } else {
+        switchStream(CONFIG.defaultStreamUrl);
+      }
+    });
+
+    // Audio mode button functionality
+    document.getElementById('audioModeBtn').addEventListener('click', toggleAudioMode);
+    
+    // Close audio player button
+    document.getElementById('closeAudioBtn').addEventListener('click', () => {
+      if (CONFIG.isAudioMode) {
+        toggleAudioMode();
+      }
     });
 
     // Stream switcher functionality
@@ -558,20 +653,153 @@
       }
     });
     
-    try {
-      if (typeof jwplayer === 'function' && jwplayer().getState) {
-        jwplayer().load([{ file: CONFIG.currentStreamUrl }]);
-        jwplayer().play();
-      } else {
+    if (CONFIG.isAudioMode) {
+      // If in audio mode, switch the audio source
+      const audioElement = document.getElementById('audioElement');
+      audioElement.src = newUrl;
+      audioElement.play().catch(e => {
+        console.error('Audio stream switch failed:', e);
+      });
+    } else {
+      // Normal video stream switching
+      try {
+        if (typeof jwplayer === 'function' && jwplayer().getState) {
+          jwplayer().load([{ file: CONFIG.currentStreamUrl }]);
+          jwplayer().play();
+        } else {
+          setupFallbackPlayer();
+        }
+      } catch (e) {
+        console.error('Stream switch failed:', e);
         setupFallbackPlayer();
       }
-    } catch (e) {
-      console.error('Stream switch failed:', e);
-      setupFallbackPlayer();
     }
     
-    // Close the switcher after selection
     document.getElementById('streamSwitcherOverlay').style.display = 'none';
+  }
+
+  function toggleAudioMode() {
+    CONFIG.isAudioMode = !CONFIG.isAudioMode;
+    
+    if (CONFIG.isAudioMode) {
+      // Switch to audio mode
+      document.getElementById('audioPlayer').style.display = 'flex';
+      document.getElementById('audioModeBtn').innerHTML = '<i class="fas fa-video"></i>';
+      document.getElementById('audioModeBtn').title = 'Switch to video mode';
+      document.getElementById('audioModeBtn').style.background = 'var(--primary)';
+      
+      // Hide video players
+      document.getElementById('player').style.display = 'none';
+      document.getElementById('fallbackPlayer').style.display = 'none';
+      
+      // Try to play audio stream
+      try {
+        const audioElement = document.getElementById('audioElement');
+        audioElement.src = CONFIG.currentStreamUrl;
+        audioElement.play().catch(e => {
+          console.error('Audio play failed:', e);
+          toggleAudioMode(); // Revert if playback fails
+        });
+      } catch (e) {
+        console.error('Audio mode switch failed:', e);
+        toggleAudioMode(); // Revert if error occurs
+      }
+    } else {
+      // Switch back to video mode
+      document.getElementById('audioPlayer').style.display = 'none';
+      document.getElementById('audioModeBtn').innerHTML = '<i class="fas fa-music"></i>';
+      document.getElementById('audioModeBtn').title = 'Switch to audio-only mode';
+      document.getElementById('audioModeBtn').style.background = 'var(--audio)';
+      
+      // Pause and reset audio
+      const audioElement = document.getElementById('audioElement');
+      audioElement.pause();
+      audioElement.src = '';
+      
+      // Show appropriate video player
+      if (document.getElementById('player').style.display === 'block') {
+        document.getElementById('player').style.display = 'block';
+      } else {
+        document.getElementById('fallbackPlayer').style.display = 'block';
+      }
+      
+      // Resume video playback
+      try {
+        if (jwplayer().getState() === 'paused') {
+          jwplayer().play();
+        }
+      } catch (e) {
+        const video = document.querySelector('#fallbackPlayer video');
+        if (video && video.paused) video.play().catch(console.error);
+      }
+    }
+  }
+
+  function setupVisibilityHandlers() {
+    // Handle visibility change
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    // Telegram-specific background detection
+    if (window.Telegram?.WebApp) {
+      Telegram.WebApp.onEvent('viewportChanged', (event) => {
+        if (event.isStateStable === false) {
+          CONFIG.isBackgrounded = true;
+          handleBackgroundPlayback();
+        } else {
+          CONFIG.isBackgrounded = false;
+        }
+      });
+    }
+  }
+
+  function handleVisibilityChange() {
+    if (document.hidden) {
+      CONFIG.isBackgrounded = true;
+      handleBackgroundPlayback();
+    } else {
+      CONFIG.isBackgrounded = false;
+      // Try to resume playback when returning to app
+      if (CONFIG.isAudioMode) {
+        const audioElement = document.getElementById('audioElement');
+        if (audioElement.paused) audioElement.play().catch(console.error);
+      } else {
+        try {
+          if (jwplayer().getState() === 'paused') {
+            jwplayer().play();
+          }
+        } catch (e) {
+          const video = document.querySelector('#fallbackPlayer video');
+          if (video && video.paused) video.play().catch(console.error);
+        }
+      }
+    }
+  }
+
+  function handleBackgroundPlayback() {
+    // Show notification about background playback
+    if (window.Telegram?.WebApp?.showAlert) {
+      Telegram.WebApp.showAlert(
+        "Playback will pause when minimized. Return to the app to continue watching.",
+        () => {}
+      );
+    } else {
+      alert("Playback will pause when minimized. Return to the app to continue watching.");
+    }
+    
+    // Try to pause playback (most browsers will do this automatically)
+    if (CONFIG.isAudioMode) {
+      const audioElement = document.getElementById('audioElement');
+      if (!audioElement.paused) audioElement.pause();
+    } else {
+      try {
+        if (jwplayer().getState() === 'playing') {
+          jwplayer().pause();
+        }
+      } catch (e) {
+        const video = document.querySelector('#fallbackPlayer video');
+        if (video && !video.paused) video.pause();
+      }
+    }
   }
 </script>
 
