@@ -40,7 +40,7 @@
       width: 100%;
       max-width: 1200px;
       height: 0;
-      padding-bottom: 56.25%; /* 16:9 aspect ratio */
+      padding-bottom: 56.25%;
       position: relative;
       margin: 0 auto;
     }
@@ -179,7 +179,6 @@
       color: var(--text-muted);
     }
 
-    /* Improved Stream Switcher */
     .stream-switcher-overlay {
       position: fixed;
       top: 0;
@@ -309,7 +308,6 @@
       font-size: 20px;
     }
 
-    /* Reset Stream Button */
     .reset-stream-btn {
       position: fixed;
       bottom: 20px;
@@ -337,7 +335,6 @@
       font-size: 20px;
     }
 
-    /* Audio Mode Button */
     .audio-mode-btn {
       position: fixed;
       bottom: 20px;
@@ -366,7 +363,6 @@
       font-size: 20px;
     }
 
-    /* Audio Player */
     .audio-player {
       position: fixed;
       bottom: 80px;
@@ -398,7 +394,6 @@
       cursor: pointer;
     }
 
-    /* Audio-only notification */
     .audio-notification {
       position: fixed;
       top: 20px;
@@ -446,7 +441,6 @@
   <div id="fallbackPlayer"></div>
 </div>
 
-<!-- Control Buttons -->
 <div class="reset-stream-btn" id="resetStreamBtn" title="Reset to default stream">
   <i class="fas fa-sync-alt"></i>
 </div>
@@ -459,18 +453,15 @@
   <i class="fas fa-exchange-alt"></i>
 </div>
 
-<!-- Audio Player -->
 <div class="audio-player" id="audioPlayer">
   <audio id="audioElement" controls></audio>
   <button class="close-audio" id="closeAudioBtn">&times;</button>
 </div>
 
-<!-- Audio Notification -->
 <div class="audio-notification" id="audioNotification">
   Audio is playing in background
 </div>
 
-<!-- Stream Switcher Overlay -->
 <div class="stream-switcher-overlay" id="streamSwitcherOverlay">
   <div class="stream-switcher-container">
     <div class="stream-switcher-header">
@@ -541,12 +532,16 @@
     telegramChannel: "https://t.me/neprosz",
     currentStreamUrl: "",
     isAudioMode: false,
-    isBackgrounded: false,
-    activePlayer: null, // 'jwplayer' or 'fallback'
-    hls: null
+    hls: null,
+    audioElement: null,
+    audioContext: null,
+    mediaElementSource: null
   };
 
   document.addEventListener('DOMContentLoaded', () => {
+    // Initialize audio element
+    CONFIG.audioElement = document.getElementById('audioElement');
+    
     // Set the current stream to default
     CONFIG.currentStreamUrl = CONFIG.defaultStreamUrl;
     
@@ -558,15 +553,27 @@
       return;
     }
 
+    // Initialize Telegram WebApp
+    if (window.Telegram?.WebApp) {
+      Telegram.WebApp.expand();
+      Telegram.WebApp.enableClosingConfirmation();
+      Telegram.WebApp.setHeaderColor('#17212b');
+      Telegram.WebApp.BackButton.show();
+      Telegram.WebApp.BackButton.onClick(() => {
+        if (CONFIG.isAudioMode) {
+          toggleAudioMode();
+        }
+      });
+    }
+
     initPlayer();
-    setupVisibilityHandlers();
 
     // Reset stream button functionality
     document.getElementById('resetStreamBtn').addEventListener('click', () => {
       if (CONFIG.isAudioMode) {
-        toggleAudioMode(); // First switch back to video mode
+        toggleAudioMode();
         setTimeout(() => {
-          switchStream(CONFIG.defaultStreamUrl); // Then reset stream
+          switchStream(CONFIG.defaultStreamUrl);
         }, 300);
       } else {
         switchStream(CONFIG.defaultStreamUrl);
@@ -592,7 +599,6 @@
       document.getElementById('streamSwitcherOverlay').style.display = 'none';
     });
 
-    // Close switcher when clicking outside
     document.getElementById('streamSwitcherOverlay').addEventListener('click', (e) => {
       if (e.target === document.getElementById('streamSwitcherOverlay')) {
         document.getElementById('streamSwitcherOverlay').style.display = 'none';
@@ -642,16 +648,11 @@
       
       player.on('ready', () => {
         document.getElementById('player').style.display = 'block';
-        CONFIG.activePlayer = 'jwplayer';
       });
       
       player.on('error', (e) => {
         console.error('JWPlayer error:', e);
         setupFallbackPlayer();
-      });
-      
-      player.on('play', () => {
-        CONFIG.activePlayer = 'jwplayer';
       });
     } catch (e) {
       console.error("JWPlayer init error:", e);
@@ -667,18 +668,11 @@
       </video>
     `;
     fallback.style.display = 'block';
-    CONFIG.activePlayer = 'fallback';
-    
-    const video = fallback.querySelector('video');
-    video.addEventListener('play', () => {
-      CONFIG.activePlayer = 'fallback';
-    });
   }
 
   function switchStream(newUrl) {
     CONFIG.currentStreamUrl = newUrl;
     
-    // Highlight selected option
     const options = document.querySelectorAll('.stream-option');
     options.forEach(option => {
       option.classList.remove('active');
@@ -688,17 +682,14 @@
     });
     
     if (CONFIG.isAudioMode) {
-      // If in audio mode, switch the audio source
       initHlsAudio(newUrl);
     } else {
-      // Normal video stream switching
       try {
         if (typeof jwplayer === 'function' && jwplayer().load) {
           jwplayer().load([{ file: newUrl }]);
           jwplayer().play();
           document.getElementById('player').style.display = 'block';
           document.getElementById('fallbackPlayer').style.display = 'none';
-          CONFIG.activePlayer = 'jwplayer';
         } else {
           setupFallbackPlayer();
         }
@@ -712,42 +703,79 @@
   }
 
   function initHlsAudio(url) {
-    // Destroy previous HLS instance if exists
+    // Clean up previous instances
     if (CONFIG.hls) {
       CONFIG.hls.destroy();
     }
-    
-    const audioElement = document.getElementById('audioElement');
-    
+    if (CONFIG.audioContext) {
+      CONFIG.audioContext.close();
+    }
+
+    // Create new audio context
+    CONFIG.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    CONFIG.mediaElementSource = CONFIG.audioContext.createMediaElementSource(CONFIG.audioElement);
+    CONFIG.mediaElementSource.connect(CONFIG.audioContext.destination);
+
     if (Hls.isSupported()) {
-      CONFIG.hls = new Hls();
+      CONFIG.hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: true,
+        maxBufferLength: 30,
+        maxMaxBufferLength: 600,
+        backBufferLength: 30
+      });
+      
       CONFIG.hls.loadSource(url);
-      CONFIG.hls.attachMedia(audioElement);
+      CONFIG.hls.attachMedia(CONFIG.audioElement);
+      
       CONFIG.hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        audioElement.play().catch(e => {
-          console.error('Audio play failed:', e);
-          toggleAudioMode(); // Revert if playback fails
+        document.getElementById('audioNotification').style.display = 'block';
+        
+        // Resume audio context if suspended
+        if (CONFIG.audioContext.state === 'suspended') {
+          CONFIG.audioContext.resume();
+        }
+        
+        CONFIG.audioElement.play().catch(e => {
+          console.error('Initial play failed:', e);
+          // For iOS, we need user interaction
+          if (/iPad|iPhone|iPod/.test(navigator.userAgent)) {
+            const playHandler = () => {
+              CONFIG.audioElement.play();
+              document.body.removeEventListener('click', playHandler);
+            };
+            document.body.addEventListener('click', playHandler);
+          }
         });
       });
       
       CONFIG.hls.on(Hls.Events.ERROR, (event, data) => {
         if (data.fatal) {
-          console.error('HLS Error:', data);
-          toggleAudioMode(); // Revert to video mode on fatal error
+          switch(data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              console.error('Network error, trying to recover');
+              CONFIG.hls.startLoad();
+              break;
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              console.error('Media error, recovering');
+              CONFIG.hls.recoverMediaError();
+              break;
+            default:
+              console.error('Unrecoverable error');
+              toggleAudioMode();
+              break;
+          }
         }
       });
-    } else if (audioElement.canPlayType('application/vnd.apple.mpegurl')) {
+    } else if (CONFIG.audioElement.canPlayType('application/vnd.apple.mpegurl')) {
       // For Safari
-      audioElement.src = url;
-      audioElement.addEventListener('loadedmetadata', () => {
-        audioElement.play().catch(e => {
-          console.error('Audio play failed:', e);
-          toggleAudioMode(); // Revert if playback fails
+      CONFIG.audioElement.src = url;
+      CONFIG.audioElement.addEventListener('loadedmetadata', () => {
+        document.getElementById('audioNotification').style.display = 'block';
+        CONFIG.audioElement.play().catch(e => {
+          console.error('Safari play failed:', e);
         });
       });
-    } else {
-      console.error('HLS not supported');
-      toggleAudioMode(); // Revert to video mode
     }
   }
 
@@ -760,12 +788,13 @@
       document.getElementById('audioModeBtn').innerHTML = '<i class="fas fa-video"></i>';
       document.getElementById('audioModeBtn').title = 'Switch to video mode';
       document.getElementById('audioModeBtn').style.background = 'var(--primary)';
-      document.getElementById('audioNotification').style.display = 'block';
       
-      // Pause current video player
-      if (CONFIG.activePlayer === 'jwplayer' && typeof jwplayer === 'function') {
-        jwplayer().pause();
-      } else {
+      // Pause video players
+      try {
+        if (jwplayer().getState) {
+          jwplayer().pause();
+        }
+      } catch (e) {
         const video = document.querySelector('#fallbackPlayer video');
         if (video) video.pause();
       }
@@ -774,77 +803,43 @@
       document.getElementById('player').style.display = 'none';
       document.getElementById('fallbackPlayer').style.display = 'none';
       
-      // Initialize HLS audio player
+      // Initialize audio
       initHlsAudio(CONFIG.currentStreamUrl);
       
     } else {
       // Switch back to video mode
       document.getElementById('audioPlayer').style.display = 'none';
+      document.getElementById('audioNotification').style.display = 'none';
       document.getElementById('audioModeBtn').innerHTML = '<i class="fas fa-music"></i>';
       document.getElementById('audioModeBtn').title = 'Switch to audio-only mode';
       document.getElementById('audioModeBtn').style.background = 'var(--audio)';
-      document.getElementById('audioNotification').style.display = 'none';
       
-      // Destroy HLS instance
+      // Clean up audio
       if (CONFIG.hls) {
         CONFIG.hls.destroy();
         CONFIG.hls = null;
       }
+      if (CONFIG.audioContext) {
+        CONFIG.audioContext.close();
+        CONFIG.audioContext = null;
+      }
+      CONFIG.audioElement.pause();
+      CONFIG.audioElement.src = '';
       
-      // Pause and reset audio
-      const audioElement = document.getElementById('audioElement');
-      audioElement.pause();
-      audioElement.src = '';
-      
-      // Show and play appropriate video player
-      if (CONFIG.activePlayer === 'jwplayer') {
-        document.getElementById('player').style.display = 'block';
-        document.getElementById('fallbackPlayer').style.display = 'none';
-        try {
-          if (jwplayer().getState() === 'paused') {
-            jwplayer().play();
-          }
-        } catch (e) {
-          console.error('JWPlayer resume failed:', e);
-          setupFallbackPlayer();
+      // Show video player
+      try {
+        if (typeof jwplayer === 'function' && jwplayer().getState) {
+          document.getElementById('player').style.display = 'block';
+          jwplayer().play();
+        } else {
+          const video = document.querySelector('#fallbackPlayer video');
+          if (video) video.play();
         }
-      } else {
-        document.getElementById('player').style.display = 'none';
-        document.getElementById('fallbackPlayer').style.display = 'block';
-        const video = document.querySelector('#fallbackPlayer video');
-        if (video && video.paused) {
-          video.play().catch(e => {
-            console.error('Fallback player resume failed:', e);
-          });
-        }
+      } catch (e) {
+        console.error('Error resuming video:', e);
       }
     }
   }
-
-  function setupVisibilityHandlers() {
-    // Handle visibility change
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    
-    // Telegram-specific background detection
-    if (window.Telegram?.WebApp) {
-      Telegram.WebApp.onEvent('viewportChanged', (event) => {
-        if (event.isStateStable === false) {
-          CONFIG.isBackgrounded = true;
-        } else {
-          CONFIG.isBackgrounded = false;
-        }
-      });
-    }
-  }
-
-  function handleVisibilityChange() {
-    if (document.hidden) {
-      CONFIG.isBackgrounded = true;
-    } else {
-      CONFIG.isBackgrounded = false;
-    }
-  }
 </script>
-
 </body>
 </html>
